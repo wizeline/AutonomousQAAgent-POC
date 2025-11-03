@@ -70,6 +70,7 @@ jobs:
         run: |
           cd unpacked
           pip install pytest pytest-cov pytest-mock
+          export PYTHONPATH="${GITHUB_WORKSPACE}:$PYTHONPATH"
           pytest -q --maxfail=1 --disable-warnings \
             --cov=. --cov-report=xml:../coverage.xml \
             --junitxml=../junit.xml
