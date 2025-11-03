@@ -101,23 +101,3 @@ jobs:
             coverage/
             unpacked/coverage/
           if-no-files-found: ignore
-
-  notify-n8n:
-    if: always()
-    needs: run-uploaded-tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Notify n8n webhook
-        run: |
-          payload=$(jq -n \
-            --arg status "${{ needs.run-uploaded-tests.result }}" \
-            --arg conclusion "${{ job.status }}" \
-            --arg repo "${{ github.repository }}" \
-            --arg run_id "${{ github.run_id }}" \
-            --arg run_url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --arg sha "${{ github.sha }}" \
-            '{status:$status, conclusion:$conclusion, repository:$repo, run_id:$run_id, run_url:$run_url, sha:$sha}')
-          curl -X POST \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            "https://test.omega.wizeline.io/webhook/2a2f3b97-3abc-4abb-9872-cbb78b8b5213"
