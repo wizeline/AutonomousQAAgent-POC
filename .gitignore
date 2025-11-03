@@ -1,1 +1,26 @@
-.venv
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+
+# Test / coverage outputs
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+
+# Project artifacts generated during runs
+artifacts/
+
+# IDE state
+.idea/
+.vscode/
+
