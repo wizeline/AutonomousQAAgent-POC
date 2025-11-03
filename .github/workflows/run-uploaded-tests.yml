@@ -72,9 +72,7 @@ jobs:
           pip install pytest pytest-cov pytest-mock
           export PYTHONPATH="${GITHUB_WORKSPACE}:$PYTHONPATH"
           pytest -q --maxfail=1 --disable-warnings \
-            --cov=. \
-            --cov-report=xml:../coverage.xml \
-            --cov-report=html:../coverage_html \
+            --cov=. --cov-report=xml:../coverage.xml \
             --junitxml=../junit.xml
           echo "✅ Pytest run complete."
 
@@ -102,5 +100,4 @@ jobs:
             junit.xml
             coverage/
             unpacked/coverage/
-            coverage_html/
           if-no-files-found: ignore
