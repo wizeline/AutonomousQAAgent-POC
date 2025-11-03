@@ -1,0 +1,102 @@
+name: Run Uploaded Tests
+
+on:
+  push:
+    paths:
+      - 'artifacts/**/*.tar.gz'
+      - 'artifacts/**/*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-uploaded-tests:
+    name: Unpack & Execute Uploaded Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find uploaded archive
+        id: find
+        run: |
+          # Find the most recent archive in artifacts/
+          file=$(find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) | sort | tail -n 1)
+          if [ -z "$file" ]; then
+            echo "❌ No archive found in artifacts/"
+            exit 1
+          fi
+          echo "Found archive: $file"
+          echo "archive=$file" >> $GITHUB_OUTPUT
+
+      - name: Extract archive
+        run: |
+          mkdir -p unpacked
+          if [[ "${{ steps.find.outputs.archive }}" == *.tar.gz ]]; then
+            tar -xzf "${{ steps.find.outputs.archive }}" -C unpacked
+          elif [[ "${{ steps.find.outputs.archive }}" == *.zip ]]; then
+            unzip -o "${{ steps.find.outputs.archive }}" -d unpacked
+          else
+            echo "Unsupported archive type"
+            exit 1
+          fi
+          echo "✅ Extracted contents:"
+          ls -R unpacked
+
+      - name: Detect project type
+        id: detect
+        run: |
+          if compgen -G "unpacked/tests/*.py" > /dev/null; then
+            echo "type=python" >> $GITHUB_OUTPUT
+            echo "Detected Python tests."
+          elif compgen -G "unpacked/test/*.js" > /dev/null; then
+            echo "type=node" >> $GITHUB_OUTPUT
+            echo "Detected Node tests."
+          else
+            echo "No recognized test files found."
+            exit 1
+          fi
+
+      - name: Run Python tests
+        if: steps.detect.outputs.type == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+        continue-on-error: false
+      - name: Execute pytest
+        if: steps.detect.outputs.type == 'python'
+        run: |
+          cd unpacked
+          pip install pytest pytest-cov pytest-mock
+          pytest -q --maxfail=1 --disable-warnings \
+            --cov=. --cov-report=xml:../coverage.xml \
+            --junitxml=../junit.xml
+          echo "✅ Pytest run complete."
+
+      - name: Run Node tests
+        if: steps.detect.outputs.type == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+        continue-on-error: false
+      - name: Execute vitest
+        if: steps.detect.outputs.type == 'node'
+        run: |
+          cd unpacked
+          npm install vitest
+          npx vitest run --coverage
+          echo "✅ Vitest run complete."
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            coverage.xml
+            junit.xml
+            coverage/
+            unpacked/coverage/
+          if-no-files-found: ignore
