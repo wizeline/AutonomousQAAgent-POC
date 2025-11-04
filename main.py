@@ -1,9 +1,21 @@
-import math
+"""Entry point re-exporting helpers for legacy compatibility."""
 
+from number_tools import (
+    NumberSeries,
+    SummaryStatistics,
+    factorial,
+    get_square_root,
+    is_positive_number,
+    normalize,
+    summarize,
+)
 
-def get_square_root(number: float):
-    square_root = math.sqrt(number)
-    return square_root
-
-def is_positive_number(number: float):
-    return number > 0
+__all__ = [
+    "get_square_root",
+    "is_positive_number",
+    "factorial",
+    "normalize",
+    "SummaryStatistics",
+    "summarize",
+    "NumberSeries",
+]
