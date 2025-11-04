@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   run-uploaded-tests:
@@ -104,3 +105,36 @@ jobs:
             unpacked/coverage/
             coverage_html/
           if-no-files-found: ignore
+
+  publish-test-results:
+    needs: run-uploaded-tests
+    if: needs.run-uploaded-tests.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download test results artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: qa-results/run-${{ github.run_id }}
+
+      - name: List downloaded results
+        run: |
+          ls -R qa-results
+
+      - name: Create pull request with results
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: add test results for run ${{ github.run_id }}"
+          branch: "ci/test-results-${{ github.run_id }}"
+          title: "Add test results for workflow run #${{ github.run_id }}"
+          body: |
+            ## Summary
+            - Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Status: ${{ needs.run-uploaded-tests.result }}
+          add-paths: |
+            qa-results/run-${{ github.run_id }}
