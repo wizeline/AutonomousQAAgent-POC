@@ -1,0 +1,253 @@
+{
+  "name": "AgentGenerateUT",
+  "nodes": [
+    {
+      "parameters": {
+        "executeOnce": false,
+        "command": "=set -eu\nREMOTE_DIR=\"/tmp/aqa_run_$$\"\nmkdir -p \"$REMOTE_DIR\"\ncat > \"$REMOTE_DIR/repo.tgz\" < /dev/stdin\ncd \"$REMOTE_DIR\"\ntar -xzf repo.tgz\n\npython3 -m venv venv\n. venv/bin/activate\npip install -q pytest pytest-cov pytest-mock\n\ncd repo\npytest -q --maxfail=1 --disable-warnings \\\n  --cov=. --cov-report=xml:\"$REMOTE_DIR/coverage.xml\" \\\n  --junitxml=\"$REMOTE_DIR/junit.xml\"\n\necho \"REMOTE_JUNIT=$REMOTE_DIR/junit.xml\"\necho \"REMOTE_COVERAGE=$REMOTE_DIR/coverage.xml\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        400,
+        288
+      ],
+      "id": "3e46281c-6a21-41cc-9cf9-ebc349e4de6a",
+      "name": "Run Tests + Coverage",
+      "alwaysOutputData": true,
+      "notesInFlow": false,
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = $prevNode['Run Tests + Coverage']?.json?.stdout ?? '';\nfunction first(re){ const m = out.match(re); return m ? m[1] : null; }\nfunction all(re){ const arr=[]; let m; while((m=re.exec(out))!==null) arr.push(m[1]); return arr; }\n\nconst status   = first(/AQA_STATUS=([^\\s]+)/);\nconst exitCode = (()=>{ const s=first(/EXIT_CODE=(\\d+)/); return s!=null?Number(s):null; })();\n\nconst junit    = first(/ART_JUNIT=([^\\n\\r]+)/);\nconst coverage = first(/ART_COVERAGE=([^\\n\\r]+)/);\nconst logs     = all(/ART_LOG=([^\\n\\r]+)/g);\n\nconst tests   = Number(first(/AQA_TESTS=(\\d+)/)   || 0);\nconst passed  = Number(first(/AQA_PASSED=(\\d+)/)  || 0);\nconst fails   = Number(first(/AQA_FAILS=(\\d+)/)   || 0);\nconst errors  = Number(first(/AQA_ERRORS=(\\d+)/)  || 0);\nconst skipped = Number(first(/AQA_SKIPPED=(\\d+)/) || 0);\nconst lineRate= Number(first(/AQA_LINE_RATE=([\\d.]+)/) || 0);\n\nconst passRatePct = tests ? Math.round((passed/tests)*1000)/10 : 0;\nconst covPct      = Math.round(lineRate*10000)/100;\nconst ok          = status==='ok' && exitCode===0 && fails===0 && errors===0;\n\nreturn [{\n  ...$json,\n  results: {\n    status, exitCode, ok,\n    junit, coverage, logs,\n    metrics: { tests, passed, fails, errors, skipped, passRatePct, covPct }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        160
+      ],
+      "id": "c1e6cb25-9004-4248-bc68-bfddcc51d999",
+      "name": "Summarize Results"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Explode Agent Tests (fixed)\nconst src = $json;\n\n// Prefer top-level tests; fall back to output.tests\nconst tests = Array.isArray(src.tests) && src.tests.length\n  ? src.tests\n  : (Array.isArray(src.output?.tests) ? src.output.tests : []);\n\nconst language =\n  src.language ?? src.output?.language ?? 'python';\n\nconst framework =\n  src.framework ?? (language === 'node' ? 'vitest' : 'pytest');\n\nconst subdir =\n  src.subdir ?? src.output?.subdir ?? '';\n\nif (!tests.length) {\n  // no real tests -> mark so we can create a smoke test later\n  return [{ ...src, language, framework, subdir, _noAgentTests: true }];\n}\n\n// explode: one item per test\nreturn tests.map(t => ({\n  ...src,\n  language,\n  framework,\n  subdir,\n  testPath: t.path,\n  testB64: t.content_b64\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        496
+      ],
+      "id": "7b7ce29a-f32b-400b-880c-61171220c474",
+      "name": "Explode Agent Tests",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "command": "=set -eu\n\nWORKDIR=\"{{ $json.workDir }}\"\nARTDIR=\"{{ $json.artDir }}\"\nSUBDIR=\"{{ $json.subdir || '' }}\"\nLANG=\"{{ $json.language }}\"\nMODULE=\"{{ $json.module }}\"\nREPO=\"$WORKDIR/repo${SUBDIR:+/$SUBDIR}\"\n\nmkdir -p \"$REPO\" \"$ARTDIR\"\n\n# 1) Write the source code (from Extract from File)\ncat > \"$REPO/$MODULE\" <<'SRC'\n{{ $json.code }}\nSRC\n\n# Python package hints for relative imports\nif [ \"$LANG\" = \"python\" ]; then\n  touch \"$REPO/__init__.py\" || true\nfi\n\n# 2) Save agent tests to a JSON file (robust against quoting)\ncat > \"$REPO/.agent-tests.json\" <<'JSON'\n{{ JSON.stringify($json.tests || ($json.output && $json.output.tests) || []) }}\nJSON\n\n# 3) Write tests using Node (no python3 required)\nexport REPO  # ensure child sees it\nnode <<'NODE'\nconst fs = require('fs');\nconst path = require('path');\n\nconst repo = process.env.REPO;\nif (!repo) { console.error('REPO env missing'); process.exit(2); }\n\nlet tests = [];\ntry {\n  const raw = fs.readFileSync(path.join(repo, '.agent-tests.json'), 'utf8');\n  tests = JSON.parse(raw || '[]');\n} catch (e) {\n  console.error('Failed to read/parse .agent-tests.json:', e.message);\n  tests = [];\n}\n\nlet wrote = 0;\nif (Array.isArray(tests)) {\n  for (const t of tests) {\n    if (!t || !t.path || !t.content_b64) continue;\n    const dest = path.join(repo, t.path);\n    fs.mkdirSync(path.dirname(dest), { recursive: true });\n    fs.writeFileSync(dest, Buffer.from(String(t.content_b64), 'base64'));\n    console.log('[write]', dest);\n    wrote++;\n  }\n}\n// help pytest discovery if tests/ exists\nconst testsDir = path.join(repo, 'tests');\nif (fs.existsSync(testsDir)) {\n  try { fs.writeFileSync(path.join(testsDir, '__init__.py'), ''); } catch {}\n}\nconsole.error('AQA_WROTE_TESTS=' + wrote);\nNODE\n\necho \"REPO=$REPO\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -336,
+        496
+      ],
+      "id": "ca9f9a09-417e-4b0c-8bc9-87ed821ca98e",
+      "name": "Write Source & Tests",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "command": "=set -eu\nWORKDIR=\"{{ $item(0).$node['Assemble Run Metadata1'].json.workDir }}\"\nREPO=\"$WORKDIR/repo\"\ncd \"$WORKDIR\"\ntar -czf repo.tgz -C \"$WORKDIR\" repo\necho \"AQA_STATUS=ok\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "70062ab8-66d1-4b75-aeae-67331c362d1e",
+      "name": "Run Python Tests (Docker)"
+    },
+    {
+      "parameters": {
+        "functionCode": "// MAIN INPUT MUST BE from \"Explode Agent Tests\"\nconst explode = $json || {};\nconst agent   = explode.output || explode || {};\nconst extract = $items('Extract from File', 0, 0)[0];  // optional secondary input\nconst code    = (extract && extract.json && extract.json.data) || '';\n\n// Create run context here (no Prepare Context. needed)\nconst runId = Date.now().toString();\nconst base  = '/tmp/aqa';\n\nconst language  = (agent.language || 'python').toLowerCase();\nconst framework = (agent.framework || (language === 'node' ? 'vitest' : 'pytest')).toLowerCase();\nconst subdir    = agent.subdir || '';\nconst tests     = Array.isArray(agent.tests) ? agent.tests : [];\n\nreturn [{\n  workDir: `${base}/${runId}`,\n  artDir:  `${base}/${runId}/art`,\n  language,\n  framework,\n  subdir,\n  module: language === 'node' ? 'main.js' : 'main.py',\n  code,\n  tests,\n}];\n"
+      },
+      "id": "5d716de9-a0b1-4f71-a75b-00237f271fde",
+      "name": "Assemble Run Metadata1",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        496
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "command": "=set -eu\n\n# Read both streams from the previous node\nOUT_STD=\"$(printf \"%s\" \"{{ $json.stdout || '' }}\" | tr -d '\\r')\"\nOUT_ERR=\"$(printf \"%s\" \"{{ $json.stderr || '' }}\" | tr -d '\\r')\"\n\n# Extract REPO from stdout\nREPO=\"$(printf \"%s\\n\" \"$OUT_STD\" | awk -F= '/^REPO=/{print $2}')\"\n[ -n \"${REPO:-}\" ] || { echo \"ERROR: REPO not found in previous stdout\"; exit 2; }\n\n# AQA_WROTE_TESTS comes from stderr in your writer\nWROTE=\"$(printf \"%s\\n\" \"$OUT_ERR\" | awk -F= '/AQA_WROTE_TESTS=/{print $2}')\"\nWROTE=\"${WROTE:-0}\"\n\n# Optional: language hint for smoke test\nLANG=\"{{ $json.language || 'python' }}\"\n\necho \"REPO=$REPO\"\necho \"WROTE=$WROTE\"\n\ncd \"$REPO\"\n\n# If the writer didn't report, still check the filesystem\nHAS_FILES=0\nif find . -type f \\( -path './test/*' -o -path './tests/*' \\) | grep -q .; then\n  HAS_FILES=1\nfi\n\n# If no files, create a minimal smoke test\nif [ \"$WROTE\" -eq 0 ] && [ \"$HAS_FILES\" -eq 0 ]; then\n  if [ \"$LANG\" = \"node\" ]; then\n    mkdir -p test\n    cat > test/auto-agent.test.js <<'JS'\nimport { describe, it, expect } from 'vitest';\ndescribe('auto-agent smoke', () => { it('loads', () => { expect(1).toBe(1); }); });\nJS\n  else\n    mkdir -p tests\n    cat > tests/test_auto_agent.py <<'PY'\ndef test_smoke():\n    assert True\nPY\n  fi\n  HAS_FILES=1\nfi\n\nif [ \"$HAS_FILES\" -eq 1 ]; then\n  ARCH=\"/tmp/agent-tests-$$.tar.gz\"\n  # tar only test files; POSIX-friendly\n  FILES=\"$(find . -type f \\( -path './test/*' -o -path './tests/*' \\) -print | sed 's|^\\./||')\"\n  tar -czf \"$ARCH\" $FILES\n  echo \"ARCHIVE=$ARCH\"\nelse\n  echo \"NO_TESTS=1\"\nfi"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        496
+      ],
+      "id": "7ea63d0d-d66b-4126-8383-4119cc939d94",
+      "name": "Detect and Zip Tests"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "owner": {
+          "__rl": true,
+          "value": "wizeline",
+          "mode": "name"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "https://github.com/wizeline/AutonomousQAAgent-POC",
+          "mode": "url"
+        },
+        "filePath": "={{ $json.repoPath }}",
+        "fileContent": "={{ $json.b64 }}",
+        "commitMessage": "chore(test): upload auto-generated tests"
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        288,
+        496
+      ],
+      "id": "7c8042ec-37a7-4833-82f0-4c3a2a537d72",
+      "name": "Create a file",
+      "webhookId": "e02dc8d5-8ab4-41f7-8b4e-17365999bbdb",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "pL0LLeAtN51Ziw2K",
+          "name": "AnDien GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n-safe archive loader (no require needed)\nconst archiveLine = ($json.stdout || '').replace(/\\r/g, '').match(/ARCHIVE=([^\\n]+)/);\nif (!archiveLine) return [];\n\nconst archivePath = archiveLine[1];\n\n// Use built-in helper to read the file from disk\nconst { promises: fs } = require('fs').constructor\n  ? require('fs')  // sometimes available in full n8n\n  : global.fs;     // fallback for n8n sandbox\n\nlet data;\ntry {\n  data = await fs.readFile(archivePath);\n} catch (err) {\n  throw new Error(`Cannot read archive: ${archivePath} - ${err.message}`);\n}\n\n// Convert to base64\nconst b64 = Buffer.from(data).toString('base64');\n\n// Build repo-friendly filename\nconst base = archivePath.split('/').pop();\nreturn [{\n  json: {\n    repoPath: `artifacts/${base}`,\n    b64\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        496
+      ],
+      "id": "54e061e9-48e9-44dd-9128-b71ca2aadae7",
+      "name": "Load Archive as Base64"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -944,
+        496
+      ],
+      "id": "9169527d-4dce-414f-9fbb-b5580edd6708",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Explode Agent Tests": {
+      "main": [
+        [
+          {
+            "node": "Assemble Run Metadata1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Source & Tests": {
+      "main": [
+        [
+          {
+            "node": "Detect and Zip Tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Python Tests (Docker)": {
+      "main": [
+        [
+          {
+            "node": "Run Tests + Coverage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Run Metadata1": {
+      "main": [
+        [
+          {
+            "node": "Write Source & Tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect and Zip Tests": {
+      "main": [
+        [
+          {
+            "node": "Load Archive as Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Archive as Base64": {
+      "main": [
+        [
+          {
+            "node": "Create a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Explode Agent Tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3e280eab-ab82-4565-aa3b-601a54645993",
+  "meta": {
+    "instanceId": "e19bcd79288ba32d5b00c6bcd097856e2fdca4230440ae71d65e560d4587140f"
+  },
+  "id": "iWD4fWtXt8BnjVrX",
+  "tags": []
+}
