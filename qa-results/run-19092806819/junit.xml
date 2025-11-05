@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="0.051" timestamp="2025-11-05T06:00:37.888752+00:00" hostname="runnervmf2e7y"><testcase classname="unpacked.tests.test_example" name="test__smoke_imports_ok" time="0.001" /></testsuite></testsuites>
