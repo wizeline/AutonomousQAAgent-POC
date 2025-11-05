@@ -93,6 +93,24 @@ jobs:
           npx vitest run --coverage
           echo "✅ Vitest run complete."
 
+      - name: Collect generated tests (python)
+        if: steps.detect.outputs.type == 'python'
+        run: |
+          rm -rf generated-tests
+          mkdir -p generated-tests
+          if [ -d "unpacked/tests" ]; then
+            cp -R unpacked/tests generated-tests/
+          fi
+
+      - name: Collect generated tests (node)
+        if: steps.detect.outputs.type == 'node'
+        run: |
+          rm -rf generated-tests
+          mkdir -p generated-tests
+          if [ -d "unpacked/test" ]; then
+            cp -R unpacked/test generated-tests/
+          fi
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -106,7 +124,15 @@ jobs:
             coverage_html/
           if-no-files-found: ignore
 
-  publish-test-results:
+      - name: Upload generated tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-tests
+          path: generated-tests/
+          if-no-files-found: ignore
+
+  publish-generated-tests:
     needs: run-uploaded-tests
     if: needs.run-uploaded-tests.result == 'success'
     runs-on: ubuntu-latest
@@ -116,25 +142,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download test results artifact
+      - name: Download generated tests
         uses: actions/download-artifact@v4
         with:
-          name: test-results
-          path: qa-results/run-${{ github.run_id }}
+          name: generated-tests
+          path: ai-generated-tests/run-${{ github.run_id }}
 
-      - name: List downloaded results
+      - name: List downloaded tests
         run: |
-          ls -R qa-results
+          ls -R ai-generated-tests
 
-      - name: Create pull request with results
+      - name: Create pull request with generated tests
         uses: peter-evans/create-pull-request@v6
         with:
-          commit-message: "chore: add test results for run ${{ github.run_id }}"
-          branch: "ci/test-results-${{ github.run_id }}"
-          title: "Add test results for workflow run #${{ github.run_id }}"
+          commit-message: "chore: add generated tests for run ${{ github.run_id }}"
+          branch: "ci/generated-tests-${{ github.run_id }}"
+          title: "Add generated tests from workflow run #${{ github.run_id }}"
           body: |
             ## Summary
             - Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
             - Status: ${{ needs.run-uploaded-tests.result }}
           add-paths: |
-            qa-results/run-${{ github.run_id }}
+            ai-generated-tests/run-${{ github.run_id }}
