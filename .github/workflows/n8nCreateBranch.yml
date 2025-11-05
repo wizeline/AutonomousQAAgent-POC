@@ -1,0 +1,46 @@
+name: Create New Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      resumeUrl:
+        description: 'The URL of the resume'
+        required: true # or false, depending on your needs
+        type: 'string' # if using a modern schema
+
+env:
+  N8N_HOST: "https://test.omega.wizeline.io"
+
+jobs:
+  createNewBranch:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Create new branch
+        id: create-aqa-branch
+        run: |
+          timestamp=$(date +"%Y%m%d%H%M%S")
+          branchName=${{ github.ref_name }}-aqa-$timestamp
+          git status
+          git checkout -b $branchName
+          git push --set-upstream origin $branchName
+          echo "branch=$branchName" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Send data back to n8n
+        run: |
+          originUrl="${{ inputs.resumeUrl }}"
+          # if originUrl is http://localhost:<port>(/path)? replace with N8N_HOST preserving path
+          if [[ $originUrl =~ ^http://localhost:[0-9]+(/.*)?$ ]]; then
+            resumeUrl="$N8N_HOST${BASH_REMATCH[1]}"
+          else
+            resumeUrl="$originUrl"
+          fi
+          echo $resumeUrl
+          curl -X POST \
+             -H "Content-Type: application/json" \
+             -d '{"branch": "${{ steps.create-aqa-branch.outputs.branch }}"}' \
+             "$resumeUrl"
