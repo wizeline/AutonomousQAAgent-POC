@@ -4,6 +4,28 @@ from __future__ import annotations
 import math
 
 
+def add(lhs: float, rhs: float) -> float:
+    """Return the arithmetic sum of ``lhs`` and ``rhs``."""
+    return lhs + rhs
+
+
+def subtract(lhs: float, rhs: float) -> float:
+    """Return the result of ``lhs`` minus ``rhs``."""
+    return lhs - rhs
+
+
+def multiply(lhs: float, rhs: float) -> float:
+    """Return the product of ``lhs`` and ``rhs``."""
+    return lhs * rhs
+
+
+def divide(dividend: float, divisor: float) -> float:
+    """Return ``dividend`` divided by ``divisor``."""
+    if divisor == 0:
+        raise ZeroDivisionError("division by zero is undefined")
+    return dividend / divisor
+
+
 def get_square_root(number: float) -> float:
     """Return the square root of ``number`` using :func:`math.sqrt`."""
     return math.sqrt(number)
@@ -22,4 +44,3 @@ def factorial(number: int) -> int:
     for value in range(2, number + 1):
         result *= value
     return result
-
