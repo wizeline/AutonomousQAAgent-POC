@@ -9,9 +9,9 @@ from .arithmetic import (
     multiply,
     subtract,
 )
-from .scaling import normalize
-from .series import NumberSeries
-from .statistics import SummaryStatistics, summarize
+from .scaling import normalize, scale_linear
+from .series import NumberSeries, arithmetic_sequence, fibonacci, geometric_sequence
+from .statistics import SummaryStatistics, mean, median, mode, summarize, variance
 
 __all__ = [
     "add",
@@ -22,7 +22,15 @@ __all__ = [
     "get_square_root",
     "is_positive_number",
     "normalize",
+    "scale_linear",
     "NumberSeries",
+    "fibonacci",
+    "arithmetic_sequence",
+    "geometric_sequence",
     "SummaryStatistics",
+    "mean",
+    "median",
+    "mode",
+    "variance",
     "summarize",
 ]

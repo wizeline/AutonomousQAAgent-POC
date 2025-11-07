@@ -22,7 +22,7 @@ def multiply(lhs: float, rhs: float) -> float:
 def divide(dividend: float, divisor: float) -> float:
     """Return ``dividend`` divided by ``divisor``."""
     if divisor == 0:
-        raise ZeroDivisionError("division by zero is undefined")
+        raise ValueError("division by zero is undefined")
     return dividend / divisor
 
 
