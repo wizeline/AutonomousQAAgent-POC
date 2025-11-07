@@ -1,10 +1,10 @@
-name: Run Uploaded Tests
+name: Run Generated Tests
 
 on:
   push:
-    paths:
-      - 'artifacts/**/*.tar.gz'
-      - 'artifacts/**/*.zip'
+    branches:
+      - auto-generated-tests
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -12,61 +12,36 @@ permissions:
   pull-requests: write
 
 jobs:
-  run-uploaded-tests:
-    name: Unpack & Execute Uploaded Tests
+  run-tests:
+    name: Execute Test Suite
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Find uploaded archive
-        id: find
-        run: |
-          # Find the most recent archive in artifacts/
-          file=$(find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) | sort | tail -n 1)
-          if [ -z "$file" ]; then
-            echo "❌ No archive found in artifacts/"
-            exit 1
-          fi
-          echo "Found archive: $file"
-          echo "archive=$file" >> $GITHUB_OUTPUT
-
-      - name: Extract archive
-        run: |
-          mkdir -p unpacked
-          if [[ "${{ steps.find.outputs.archive }}" == *.tar.gz ]]; then
-            tar -xzf "${{ steps.find.outputs.archive }}" -C unpacked
-          elif [[ "${{ steps.find.outputs.archive }}" == *.zip ]]; then
-            unzip -o "${{ steps.find.outputs.archive }}" -d unpacked
-          else
-            echo "Unsupported archive type"
-            exit 1
-          fi
-          echo "✅ Extracted contents:"
-          ls -R unpacked
-
-      - name: Detect project type
+      - name: Detect test project type
         id: detect
         run: |
-          if compgen -G "unpacked/tests/*.py" > /dev/null; then
+          if compgen -G "tests/**/*.py" > /dev/null; then
             echo "type=python" >> $GITHUB_OUTPUT
-            echo "Detected Python tests."
-          elif compgen -G "unpacked/test/*.js" > /dev/null; then
+            echo "Detected Python tests"
+          elif compgen -G "test/**/*.js" > /dev/null; then
             echo "type=node" >> $GITHUB_OUTPUT
-            echo "Detected Node tests."
+            echo "Detected Node tests"
           else
-            echo "No recognized test files found."
+            echo "No recognized tests found"
             exit 1
           fi
 
-      - name: Run Python tests
+      - name: Setup Python
         if: steps.detect.outputs.type == 'python'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-        continue-on-error: false
-      - name: Execute pytest
+
+      - name: Run pytest
         if: steps.detect.outputs.type == 'python'
         run: |
           pip install -r requirements.txt pytest pytest-cov pytest-mock
@@ -76,89 +51,59 @@ jobs:
             --cov-report=xml:coverage.xml \
             --cov-report=html:coverage_html \
             --junitxml=junit.xml
-          echo "✅ Pytest run complete."
 
-      - name: Run Node tests
+      - name: Setup Node
         if: steps.detect.outputs.type == 'node'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-        continue-on-error: false
-      - name: Execute vitest
+
+      - name: Run vitest
         if: steps.detect.outputs.type == 'node'
         run: |
-          cd unpacked
-          npm install vitest
+          npm install
           npx vitest run --coverage
-          echo "✅ Vitest run complete."
 
-      - name: Collect generated tests (python)
-        if: steps.detect.outputs.type == 'python'
-        run: |
-          rm -rf generated-tests
-          mkdir -p generated-tests
-          if [ -d "unpacked/tests" ]; then
-            cp -R unpacked/tests generated-tests/
-          fi
-
-      - name: Collect generated tests (node)
-        if: steps.detect.outputs.type == 'node'
-        run: |
-          rm -rf generated-tests
-          mkdir -p generated-tests
-          if [ -d "unpacked/test" ]; then
-            cp -R unpacked/test generated-tests/
-          fi
-
-      - name: Upload test results
+      - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-artifacts-${{ github.run_id }}
           path: |
             coverage.xml
+            coverage_html/
             junit.xml
-            coverage/
-            unpacked/coverage/
           if-no-files-found: ignore
 
-      - name: Upload generated tests
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-tests
-          path: generated-tests/
-          if-no-files-found: ignore
-
-  publish-generated-tests:
-    needs: run-uploaded-tests
-    if: needs.run-uploaded-tests.result == 'success'
+  ensure-pr:
+    name: Ensure Pull Request Exists
+    needs: run-tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/auto-generated-tests' && needs.run-tests.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Create or update pull request
+        uses: actions/github-script@v7
         with:
-          fetch-depth: 0
-
-      - name: Download generated tests
-        uses: actions/download-artifact@v4
-        with:
-          name: generated-tests
-          path: ai-generated-tests/run-${{ github.run_id }}
-
-      - name: List downloaded tests
-        run: |
-          ls -R ai-generated-tests
-
-      - name: Create pull request with generated tests
-        uses: peter-evans/create-pull-request@v6
-        with:
-          commit-message: "chore: add generated tests for run ${{ github.run_id }}"
-          branch: "ci/generated-tests-${{ github.run_id }}"
-          title: "Add generated tests from workflow run #${{ github.run_id }}"
-          body: |
-            ## Summary
-            - Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            - Status: ${{ needs.run-uploaded-tests.result }}
-          add-paths: |
-            ai-generated-tests/run-${{ github.run_id }}
+          script: |
+            const branch = 'auto-generated-tests';
+            const base = 'main';
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data: pulls } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${branch}`,
+            });
+            if (pulls.length === 0) {
+              await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head: branch,
+                base,
+                title: 'Auto-generated tests update',
+                body: `Automated tests push from workflow run ${runUrl}.`,
+              });
+              core.info('Opened new pull request.');
+            } else {
+              core.info('Pull request already exists.');
+            }
