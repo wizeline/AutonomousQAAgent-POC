@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   run-uploaded-tests:
@@ -68,12 +69,13 @@ jobs:
       - name: Execute pytest
         if: steps.detect.outputs.type == 'python'
         run: |
-          cd unpacked
-          pip install pytest pytest-cov pytest-mock
+          pip install -r requirements.txt pytest pytest-cov pytest-mock
           export PYTHONPATH="${GITHUB_WORKSPACE}:$PYTHONPATH"
           pytest -q --maxfail=1 --disable-warnings \
-            --cov=. --cov-report=xml:../coverage.xml \
-            --junitxml=../junit.xml
+            --cov=. \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:coverage_html \
+            --junitxml=junit.xml
           echo "✅ Pytest run complete."
 
       - name: Run Node tests
@@ -90,6 +92,24 @@ jobs:
           npx vitest run --coverage
           echo "✅ Vitest run complete."
 
+      - name: Collect generated tests (python)
+        if: steps.detect.outputs.type == 'python'
+        run: |
+          rm -rf generated-tests
+          mkdir -p generated-tests
+          if [ -d "unpacked/tests" ]; then
+            cp -R unpacked/tests generated-tests/
+          fi
+
+      - name: Collect generated tests (node)
+        if: steps.detect.outputs.type == 'node'
+        run: |
+          rm -rf generated-tests
+          mkdir -p generated-tests
+          if [ -d "unpacked/test" ]; then
+            cp -R unpacked/test generated-tests/
+          fi
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -101,3 +121,44 @@ jobs:
             coverage/
             unpacked/coverage/
           if-no-files-found: ignore
+
+      - name: Upload generated tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-tests
+          path: generated-tests/
+          if-no-files-found: ignore
+
+  publish-generated-tests:
+    needs: run-uploaded-tests
+    if: needs.run-uploaded-tests.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download generated tests
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-tests
+          path: ai-generated-tests/run-${{ github.run_id }}
+
+      - name: List downloaded tests
+        run: |
+          ls -R ai-generated-tests
+
+      - name: Create pull request with generated tests
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: add generated tests for run ${{ github.run_id }}"
+          branch: "ci/generated-tests-${{ github.run_id }}"
+          title: "Add generated tests from workflow run #${{ github.run_id }}"
+          body: |
+            ## Summary
+            - Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Status: ${{ needs.run-uploaded-tests.result }}
+          add-paths: |
+            ai-generated-tests/run-${{ github.run_id }}
