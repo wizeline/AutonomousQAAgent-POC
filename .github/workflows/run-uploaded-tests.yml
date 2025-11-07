@@ -24,7 +24,7 @@ jobs:
       - name: Detect test project type
         id: detect
         run: |
-          if compgen -G "tests/**/*.py" > /dev/null; then
+          if compgen -G "tests/*.py" > /dev/null; then
             echo "type=python" >> $GITHUB_OUTPUT
             echo "Detected Python tests"
           elif compgen -G "test/**/*.js" > /dev/null; then
