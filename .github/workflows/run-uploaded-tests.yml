@@ -69,14 +69,13 @@ jobs:
       - name: Execute pytest
         if: steps.detect.outputs.type == 'python'
         run: |
-          cd unpacked
-          pip install pytest pytest-cov pytest-mock
+          pip install -r requirements.txt pytest pytest-cov pytest-mock
           export PYTHONPATH="${GITHUB_WORKSPACE}:$PYTHONPATH"
           pytest -q --maxfail=1 --disable-warnings \
             --cov=. \
-            --cov-report=xml:../coverage.xml \
-            --cov-report=html:../coverage_html \
-            --junitxml=../junit.xml
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:coverage_html \
+            --junitxml=junit.xml
           echo "✅ Pytest run complete."
 
       - name: Run Node tests
