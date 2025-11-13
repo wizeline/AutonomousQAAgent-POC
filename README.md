@@ -94,6 +94,23 @@ Key nodes (by name) and roles:
 - `Prepare Git Commit` / `Create/Update File on GitHub` (code + httpRequest nodes)
   - Create/commit test files to the `testBranch` branch.
 
+## Webhook Configuration
+This webhook will listen for events from **GitHub Actions**. When the test results artifact is uploaded successfully, the webhook will be triggered to download the file and send "sample" files to a specific email address.
+
+To set up the connection, you will configure your GitHub repository to use the n8n production webhook URL.
+
+### Configuration Steps
+
+1.  In your n8n workflow's Webhook node, copy the **Production URL** (or Test URL, depending on your environment).
+2.  Open the **GitHub repository** where you want to register these webhook events.
+3.  Click on the **"Settings"** tab of the repository.
+4.  In the Repo Settings sidebar, click on **"Webhooks"**.
+5.  Click the **"Add webhook"** button.
+6.  In the "Payload URL" field, paste the link copied in **Step 1**.
+7.  In the "Which events would you like to trigger this webhook?" section, tick the checkboxes for the following events:
+    * **"Check runs"**
+    * **"Pull requests"**
+8.  Finally, ensure the "Active" box is ticked (it should be by default) and click **"Add webhook"** (or **"Update webhook"** if you are editing).
 ## General flow (step-by-step)
 
 1. Trigger: `When clicking 'Test workflow'` — start the flow.
@@ -108,3 +125,9 @@ Key nodes (by name) and roles:
    - If parsing issues are encountered, `errors` are returned in the summary (the workflow includes robust parsing code to handle template literals and common malformed responses).
 8. `Export to JSON File` writes consolidated results locally.
 9. (Optional) The flow then enriches each `testFile` with repo context, creates test files locally, and pushes them to the configured `testBranch` on GitHub.
+10. When the workflow complete, the webhook of n8n will be called and send some "sample" files into a predefined email.
+
+## Future work
+
+1. The user can received email should be configurable.
+2. Send the valuable information of the test result artifact, because currently the attached file in email does not give enough insigt for user.
