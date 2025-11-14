@@ -12,7 +12,7 @@ def test_get_square_root_negative_number():
 
 def test_is_positive_number():
     assert is_positive_number(1) == True
-    assert is_positive_number(0.5) == True
+    assert is_positive_number(0.1) == True
     assert is_positive_number(0) == False
     assert is_positive_number(-1) == False
-    assert is_positive_number(-0.5) == False
+    assert is_positive_number(-0.1) == False
